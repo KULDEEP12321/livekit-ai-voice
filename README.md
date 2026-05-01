@@ -1,110 +1,104 @@
-# LiveKit Vobiz Outbound Agent 📞
+# Rapid X AI · LiveKit Voice Agent
 
-A production-ready voice agent capable of making outbound calls using **LiveKit**, **Deepgram**, and **Groq (Llama 3.3)**.  
-Designed for reliability, speed, and ease of deployment.
+Outbound voice agent built on **Gemini Live** (native audio), **LiveKit** (rooms + SIP) and **Twilio** (PSTN). Comes with a Next.js dashboard for dispatching single or bulk calls and watching live sessions.
 
-## 🚀 Features
-- **Ultra-Fast LLM**: Uses **Groq** running `llama-3.3-70b-versatile` for near-instant responses.
-- **High-Quality Audio**: Uses **Deepgram** for both Speech-to-Text (STT) and Text-to-Speech (TTS).
-- **SIP Trunking**: Integrated with **Vobiz** for PSTN connectivity.
-- **Robust Configuration**: Centralized `config.py` for easy customization of prompts, models, and voices.
+## Architecture
 
----
-
-## 🛠️ Setup & Installation
-
-### 1. Prerequisites
-- Python 3.10+ (Recommended: 3.10.13)
-- A [LiveKit Cloud](https://cloud.livekit.io/) account
-- A [Deepgram](https://deepgram.com/) API Key
-- A [Groq](https://groq.com/) API Key
-- A SIP Provider (e.g., Vobiz)
-
-### 2. Clone & Install
-```bash
-# Clone the repository
-git clone <your-repo-url>
-cd LiveKit-Vobiz-Outbound-main
-
-# Create a virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+```
+ ┌────────────┐   HTTP    ┌──────────────────┐   LiveKit RPC   ┌──────────────┐
+ │ Dashboard  │──────────▶│  Next.js routes  │────────────────▶│  LiveKit     │
+ │ (Next.js)  │           │  /api/dispatch   │                 │  Cloud       │
+ └────────────┘           │  /api/queue      │                 │  + SIP trunk │
+                          │  /api/calls      │◀────────────────│              │
+                          └──────────────────┘                 └──────┬───────┘
+                                                                       │ WebRTC
+                                                                       ▼
+                                                              ┌──────────────────┐
+                                                              │  agent.py        │
+                                                              │  Gemini Live     │
+                                                              │  (STT+LLM+TTS)   │
+                                                              └──────────────────┘
+                                                                       │ SIP
+                                                                       ▼
+                                                                  Twilio PSTN
 ```
 
-### 3. Configure Environment
-Copy the example environment file and fill in your credentials:
+A single Gemini Live `RealtimeModel` replaces the old Deepgram + OpenAI/Groq + Cartesia/Sarvam pipeline — one streaming round-trip, lower latency, fewer keys to manage.
+
+## Setup
+
+### 1. Configure environment
+
 ```bash
 cp .env.example .env
-nano .env  # Or open in your editor
+# Then edit .env with your real LiveKit, Gemini and Twilio credentials.
 ```
-**Required Variables:**
-- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_SECRET`
-- `DEEPGRAM_API_KEY`
-- `GROQ_API_KEY`
-- `VOBIZ_SIP_*` variables (for outbound calls)
 
----
+### 2. Python agent
 
-## 🏃‍♂️ Usage
-
-### 1. Start the Agent
-This runs the agent process which listens for room connections.
 ```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 python agent.py start
 ```
 
-### 2. Make an Outbound Call
-In a **new terminal window** (ensure `venv` is active), run:
+### 3. Dashboard
+
 ```bash
-python make_call.py --to +91XXXXXXXXXX
+cd dashboard
+npm install
+npm run dev
+# Opens on http://${HOST}:${PORT}  (defaults to 0.0.0.0:3000)
 ```
-*Note: The number must include the country code (e.g., +1 or +91).*
 
----
+The dashboard reads `.env` from the repo root via `dotenv` because Next.js auto-loads `.env`/`.env.local` from its own folder. If you want one shared file, symlink it:
 
-## 🔧 Troubleshooting Guide
+```bash
+ln -s ../.env dashboard/.env.local
+```
 
-### ❌ Error: `model_decommissioned` (Groq/Llama)
-**Cause:** The configured LLM model is no longer supported by Groq.  
-**Fix:**
-1. Open `config.py`.
-2. Update `GROQ_MODEL` to a supported model (e.g., `llama-3.3-70b-versatile` or `llama-3.1-8b-instant`).
-3. **Restart `agent.py`** to apply changes.
+### 4. Docker (agent + dashboard)
 
-### ❌ Error: `404 Not Found` (SIP Trunk)
-**Cause:** The `SIP_TRUNK_ID` in `.env` is incorrect or doesn't exist in your LiveKit project.  
-**Fix:**
-1. Run `python list_trunks.py` to see available trunks.
-2. If none exist, run `python create_trunk.py` to create one.
-3. Update `.env` with the correct ID.
+```bash
+docker compose up --build
+```
 
-### ❌ Error: `Address already in use` (Port 8081)
-**Cause:** Another instance of `agent.py` is already running.  
-**Fix:**
-1. Find the process: `lsof -i :8081`
-2. Kill it: `kill -9 <PID>` or `pkill -f "python agent.py"`
+## SIP trunk management
 
-### ❌ Error: `No module named 'certifi'` or other imports
-**Cause:** Dependencies are missing.  
-**Fix:**
-1. Ensure your virtual environment is active (`source venv/bin/activate`).
-2. Run `pip install -r requirements.txt`.
+```bash
+python list_trunks.py            # list trunks on this LiveKit project
+python create_trunk.py           # create one from .env (writes Twilio creds)
+python setup_trunk.py            # update an existing trunk in-place
+```
 
-### ❌ Call Connects but No Audio
-**Cause:** TTS (Text-to-Speech) failure or WebSocket issues.  
-**Fix:**
-1. Check terminal logs for `APIStatusError`.
-2. If using OpenAI TTS, ensure you have OpenAI credits.
-3. Recommended: Switch to Deepgram TTS (set `TTS_PROVIDER=deepgram` in `.env`).
+## CLI dialing (no dashboard needed)
 
----
+```bash
+python make_call.py --to +919876543210 --voice Puck --prompt "Survey about coffee order"
+```
 
-## 📂 Project Structure
-- `agent.py`: Main application logic.
-- `config.py`: Central configuration for prompts, models, and constants.
-- `make_call.py`: Script to initiate outbound calls.
-- `create_trunk.py` / `setup_trunk.py`: Utilities for SIP trunk management.
-# LIvekitAIVoice
+## Dashboard endpoints
+
+| Route               | Method | Purpose                                      |
+| ------------------- | ------ | -------------------------------------------- |
+| `/api/dispatch`     | POST   | Dispatch one outbound call                   |
+| `/api/queue`        | POST   | Bulk dispatch a list of numbers              |
+| `/api/calls`        | GET    | List active call rooms                       |
+| `/api/calls`        | DELETE | Hang up a specific room (`{ roomName }`)     |
+
+## Files
+
+- `agent.py` — LiveKit worker; runs the Gemini Live realtime model.
+- `config.py` — central config; reads `.env`, supports legacy `VOBIZ_*` names.
+- `make_call.py` — CLI to dispatch a single call via `AgentDispatch`.
+- `create_trunk.py` / `setup_trunk.py` / `list_trunks.py` — SIP trunk admin.
+- `dashboard/` — Next.js app (UI + API routes).
+
+## Troubleshooting
+
+- **`GEMINI_API_KEY missing`** — set either `GEMINI_API_KEY` or `GOOGLE_API_KEY` in `.env`.
+- **`SIP_TRUNK_ID not configured`** — run `python list_trunks.py`; if empty, run `python create_trunk.py`.
+- **Twilio auth retries** — re-run `python setup_trunk.py` after rotating credentials.
+- **Dashboard 500s** — make sure `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` are exported in the env that runs `npm run dev`.
+- **Agent connects but no audio** — confirm the SIP trunk's `address` matches the Twilio Termination URI exactly, including the region prefix.

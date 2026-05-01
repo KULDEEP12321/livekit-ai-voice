@@ -1,6 +1,9 @@
 # Environment variables
 .env
 .env.local
+.env.bak*
+.env.*.bak
+*.env.backup
 
 # Python
 .venv/
@@ -17,10 +20,12 @@ dist/
 build/
 .DS_Store
 
-# Logs
+# Logs (may contain phone numbers / transcripts / API errors with keys)
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+logs/
+*.log
 
 # IDE settings
 .vscode/

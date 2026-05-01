@@ -1,76 +1,69 @@
-import os
-import certifi
-
-# Fix for macOS SSL Certificate errors - MUST be before other imports
-os.environ['SSL_CERT_FILE'] = certifi.where()
+"""CLI: dispatch the outbound voice agent into a fresh room and dial a number."""
 
 import argparse
 import asyncio
-import random
 import json
 import logging
+import os
+import random
+
+import certifi
+
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+
 from dotenv import load_dotenv
 from livekit import api
 
-# Load environment variables
+import config
+
 load_dotenv(".env")
 
+logging.basicConfig(level=logging.INFO)
+
+
 async def main():
-    parser = argparse.ArgumentParser(description="Make an outbound call via LiveKit Agent.")
-    parser.add_argument("--to", required=True, help="The phone number to call (e.g., +91...)")
+    parser = argparse.ArgumentParser(description="Dispatch an outbound LiveKit voice call.")
+    parser.add_argument("--to", required=True, help="Phone number in E.164 format, e.g. +91...")
+    parser.add_argument("--prompt", default="", help="Extra campaign context for this call.")
+    parser.add_argument("--voice", default=None, help=f"Gemini voice (default {config.GEMINI_VOICE}).")
     args = parser.parse_args()
 
-    # 1. Validation
-    phone_number = args.to.strip()
-    if not phone_number.startswith("+"):
-        print("Error: Phone number must start with '+' and country code.")
+    phone = args.to.strip()
+    if not phone.startswith("+") or len(phone) < 8:
+        print("Error: phone must start with '+' and include country code.")
         return
 
-    if len(phone_number) < 8:
-        print(f"Error: Phone number '{phone_number}' looks too short.")
+    if not (config.LIVEKIT_URL and config.LIVEKIT_API_KEY and config.LIVEKIT_API_SECRET):
+        print("Error: LiveKit credentials missing in .env")
         return
 
-    url = os.getenv("LIVEKIT_URL")
-    api_key = os.getenv("LIVEKIT_API_KEY")
-    api_secret = os.getenv("LIVEKIT_API_SECRET")
+    lk = api.LiveKitAPI(
+        url=config.LIVEKIT_URL,
+        api_key=config.LIVEKIT_API_KEY,
+        api_secret=config.LIVEKIT_API_SECRET,
+    )
 
-    if not (url and api_key and api_secret):
-        print("Error: LiveKit credentials missing in .env.local")
-        return
-
-    # 2. Setup API Client
-    lk_api = api.LiveKitAPI(url=url, api_key=api_key, api_secret=api_secret)
-
-    # 3. Create a unique room for this call
-    # We use a random suffix to ensure room names are unique
-    room_name = f"call-{phone_number.replace('+', '')}-{random.randint(1000, 9999)}"
-
-    print(f"Initating call to {phone_number}...")
-    print(f"Session Room: {room_name}")
+    room_name = f"call-{phone.replace('+', '')}-{random.randint(1000, 9999)}"
+    print(f"Dispatching call to {phone} in room {room_name}...")
 
     try:
-        # 4. Dispatch the Agent
-        # We explicitly tell LiveKit to send the 'outbound-caller' agent to this room.
-        # We pass the phone number in the 'metadata' field so the agent knows who to dial.
-        dispatch_request = api.CreateAgentDispatchRequest(
-            agent_name="outbound-caller", # Must match agent.py
-            room=room_name,
-            metadata=json.dumps({"phone_number": phone_number})
+        dispatch = await lk.agent_dispatch.create_dispatch(
+            api.CreateAgentDispatchRequest(
+                agent_name="outbound-caller",
+                room=room_name,
+                metadata=json.dumps({
+                    "phone_number": phone,
+                    "user_prompt": args.prompt,
+                    "voice_id": args.voice,
+                }),
+            )
         )
-        
-        dispatch = await lk_api.agent_dispatch.create_dispatch(dispatch_request)
-
-        print("\n✅ Call Dispatched Successfully!")
-        print(f"Dispatch ID: {dispatch.id}")
-        print("-" * 40)
-        print("The agent is now joining the room and will dial the number.")
-        print("Check your agent terminal for logs.")
-        
+        print(f"Dispatched. id={dispatch.id} room={room_name}")
     except Exception as e:
-        print(f"\n❌ Error dispatching call: {e}")
-    
+        print(f"Dispatch failed: {e}")
     finally:
-        await lk_api.aclose()
+        await lk.aclose()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

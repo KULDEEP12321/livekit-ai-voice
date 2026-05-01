@@ -1,59 +1,77 @@
 "use client";
 
-import { useState } from 'react';
-import { Phone, MessageSquare, Loader2, Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Phone, MessageSquare, Loader2, Sparkles, Bot } from 'lucide-react';
+import { GEMINI_VOICES, voiceLabel } from '../lib/voices';
+
+const SYSTEM_PROMPT_KEY = 'rapidx.dispatch.systemPrompt';
+const VOICE_KEY = 'rapidx.dispatch.voice';
 
 export default function CallDispatcher() {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [prompt, setPrompt] = useState('');
+    const [systemPrompt, setSystemPrompt] = useState('');
+    const [voice, setVoice] = useState('Aoede');
+    const [temperature, setTemperature] = useState(0.8);
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [message, setMessage] = useState('');
+
+    useEffect(() => {
+        const saved = localStorage.getItem(SYSTEM_PROMPT_KEY);
+        if (saved) setSystemPrompt(saved);
+        const savedVoice = localStorage.getItem(VOICE_KEY);
+        if (savedVoice) setVoice(savedVoice);
+    }, []);
+
+    useEffect(() => {
+        localStorage.setItem(SYSTEM_PROMPT_KEY, systemPrompt);
+    }, [systemPrompt]);
+
+    useEffect(() => {
+        localStorage.setItem(VOICE_KEY, voice);
+    }, [voice]);
 
     const handleDispatch = async (e: React.FormEvent) => {
         e.preventDefault();
         setStatus('loading');
         setMessage('');
 
-        const form = e.target as HTMLFormElement;
-        const modelProvider = (form.elements.namedItem('modelProvider') as HTMLSelectElement).value;
-        const voice = (form.elements.namedItem('voice') as HTMLSelectElement).value;
-
         try {
             const res = await fetch('/api/dispatch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phoneNumber, prompt, modelProvider, voice }),
+                body: JSON.stringify({ phoneNumber, prompt, voice, temperature, systemPrompt }),
             });
-
             const data = await res.json();
-
             if (res.ok) {
                 setStatus('success');
-                setMessage(`Call dispatched to ${phoneNumber}`);
+                setMessage(`Call dispatched to ${phoneNumber} (room ${data.roomName})`);
             } else {
                 setStatus('error');
                 setMessage(data.error || 'Failed to dispatch call');
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             setStatus('error');
-            setMessage(err.message || 'Network error');
+            setMessage(err instanceof Error ? err.message : 'Network error');
         }
     };
 
     return (
         <div className="relative group max-w-md w-full">
-            {/* Glow Effect */}
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl opacity-75 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 blur-lg animate-tilt"></div>
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl opacity-75 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 blur-lg"></div>
 
             <div className="relative p-8 bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl">
                 <div className="flex items-center justify-between mb-8">
-                    <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
-                        Deploy Agent
-                    </h2>
+                    <div>
+                        <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
+                            Deploy Agent
+                        </h2>
+                        <p className="text-xs text-gray-500 mt-1">Gemini Live · Twilio SIP</p>
+                    </div>
                     <Sparkles className="w-5 h-5 text-purple-400 animate-pulse" />
                 </div>
 
-                <form onSubmit={handleDispatch} className="space-y-6">
+                <form onSubmit={handleDispatch} className="space-y-5">
                     <div className="space-y-2">
                         <label className="text-sm text-gray-400 font-medium flex items-center gap-2">
                             <Phone className="w-4 h-4" /> Phone Number
@@ -70,41 +88,54 @@ export default function CallDispatcher() {
 
                     <div className="space-y-2">
                         <label className="text-sm text-gray-400 font-medium flex items-center gap-2">
-                            <MessageSquare className="w-4 h-4" /> Context / Prompt
+                            <Bot className="w-4 h-4" /> System Prompt <span className="text-gray-600 text-xs font-normal">(persona — leave blank for server default)</span>
                         </label>
                         <textarea
-                            placeholder="e.g. You are calling regarding a coffee order..."
+                            placeholder={"e.g. You are Priya, an outbound caller from Rapid X High School. Open by introducing yourself, then ask if the parent is interested in admissions for grades 1-10..."}
+                            value={systemPrompt}
+                            onChange={(e) => setSystemPrompt(e.target.value)}
+                            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-white placeholder-gray-600 outline-none transition-all duration-300 h-28 resize-none text-sm"
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-sm text-gray-400 font-medium flex items-center gap-2">
+                            <MessageSquare className="w-4 h-4" /> Campaign Context <span className="text-gray-600 text-xs font-normal">(per-call notes appended to persona)</span>
+                        </label>
+                        <textarea
+                            placeholder="e.g. Parent inquired about Grade 5 admission yesterday via the website."
                             value={prompt}
                             onChange={(e) => setPrompt(e.target.value)}
-                            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-white placeholder-gray-600 outline-none transition-all duration-300 h-28 resize-none"
+                            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-white placeholder-gray-600 outline-none transition-all duration-300 h-24 resize-none"
                         />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <label className="text-sm text-gray-400 font-medium">Model provider</label>
+                            <label className="text-sm text-gray-400 font-medium">Voice</label>
                             <select
-                                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-blue-500"
-                                name="modelProvider"
-                                defaultValue="openai"
+                                value={voice}
+                                onChange={(e) => setVoice(e.target.value)}
+                                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-purple-500"
                             >
-                                <option value="openai">OpenAI (GPT-4o)</option>
-                                <option value="groq">Groq (Llama 3)</option>
+                                {GEMINI_VOICES.map((v) => (
+                                    <option key={v.id} value={v.id}>{voiceLabel(v)}</option>
+                                ))}
                             </select>
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm text-gray-400 font-medium">Voice</label>
-                            <select
-                                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-purple-500"
-                                name="voice"
-                                defaultValue="alloy"
-                            >
-                                <option value="alloy">Alloy (US)</option>
-                                <option value="echo">Echo (US)</option>
-                                <option value="shimmer">Shimmer (US)</option>
-                                <option value="anushka">Anushka (Indian - Sarvam)</option>
-                                <option value="aravind">Aravind (Indian - Sarvam)</option>
-                            </select>
+                            <label className="text-sm text-gray-400 font-medium">
+                                Temperature <span className="text-gray-500 text-xs">({temperature.toFixed(1)})</span>
+                            </label>
+                            <input
+                                type="range"
+                                min={0}
+                                max={2}
+                                step={0.1}
+                                value={temperature}
+                                onChange={(e) => setTemperature(Number(e.target.value))}
+                                className="w-full mt-3 accent-purple-500"
+                            />
                         </div>
                     </div>
 
@@ -114,16 +145,12 @@ export default function CallDispatcher() {
                         className="w-full py-4 px-6 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold rounded-xl shadow-lg hover:shadow-blue-500/25 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transform hover:-translate-y-0.5 active:translate-y-0"
                     >
                         {status === 'loading' ? (
-                            <>
-                                <Loader2 className="w-5 h-5 animate-spin" /> Dispatching...
-                            </>
-                        ) : (
-                            'Initiate Call'
-                        )}
+                            <><Loader2 className="w-5 h-5 animate-spin" /> Dispatching...</>
+                        ) : 'Initiate Call'}
                     </button>
 
                     {message && (
-                        <div className={`p-4 rounded-xl text-sm text-center border animate-in fade-in slide-in-from-bottom-2 ${status === 'success' ? 'bg-green-500/10 text-green-200 border-green-500/20' : 'bg-red-500/10 text-red-200 border-red-500/20'}`}>
+                        <div className={`p-4 rounded-xl text-sm text-center border ${status === 'success' ? 'bg-green-500/10 text-green-200 border-green-500/20' : 'bg-red-500/10 text-red-200 border-red-500/20'}`}>
                             {message}
                         </div>
                     )}

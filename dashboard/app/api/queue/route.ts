@@ -1,69 +1,63 @@
 import { NextResponse } from 'next/server';
-import { roomService, sipClient } from '@/lib/server-utils';
+import { roomService, sipClient, dispatchClient, SIP_TRUNK_ID, AGENT_NAME } from '@/lib/server-utils';
 
+/** Bulk-dispatch a list of phone numbers, one room per number. */
 export async function POST(request: Request) {
     try {
-        const body = await request.json();
-        const { numbers, prompt } = body;
+        const { numbers, prompt, voice, temperature, systemPrompt } = await request.json();
 
-        if (!numbers || !Array.isArray(numbers) || numbers.length === 0) {
-            return NextResponse.json({ error: "List of phone numbers is required" }, { status: 400 });
+        if (!Array.isArray(numbers) || numbers.length === 0) {
+            return NextResponse.json({ error: 'numbers[] required' }, { status: 400 });
+        }
+        if (!SIP_TRUNK_ID) {
+            return NextResponse.json({ error: 'SIP_TRUNK_ID not configured' }, { status: 500 });
         }
 
-        const trunkId = process.env.VOBIZ_SIP_TRUNK_ID;
-        if (!trunkId) {
-            return NextResponse.json({ error: "SIP Trunk not configured" }, { status: 500 });
-        }
+        const results: Array<{ phoneNumber: string; status: string; id?: string; error?: string }> = [];
 
-        const results = [];
-
-        // Process casually to avoid rate limits (simple queue)
-        // In a real production environment, push these to a Redis queue like BullMQ
-        for (const phoneNumber of numbers) {
-            try {
-                const roomName = `call-${phoneNumber.replace(/\+/g, '')}-${Math.floor(Math.random() * 10000)}`;
-                const particpantIdentity = `sip_${phoneNumber}`;
-
-                const metadata = JSON.stringify({
-                    phone_number: phoneNumber,
-                    user_prompt: prompt || ""
-                });
-
-                await roomService.createRoom({
-                    name: roomName,
-                    metadata: metadata,
-                    emptyTimeout: 60 * 5,
-                });
-
-                const info = await sipClient.createSipParticipant(
-                    trunkId,
-                    phoneNumber,
-                    roomName,
-                    {
-                        participantIdentity: particpantIdentity,
-                        participantName: "Customer",
-                    }
-                );
-
-                results.push({ phoneNumber, status: 'dispatched', id: info.sipCallId });
-
-                // Artificial delay to prevent API flooding (200ms)
-                await new Promise(r => setTimeout(r, 200));
-
-            } catch (e: any) {
-                console.error(`Failed to dispatch ${phoneNumber}:`, e);
-                results.push({ phoneNumber, status: 'failed', error: e.message });
+        for (const raw of numbers) {
+            const phoneNumber = String(raw).trim().replace(/[^\d+]/g, '');
+            if (!phoneNumber.startsWith('+')) {
+                results.push({ phoneNumber, status: 'failed', error: 'must start with +' });
+                continue;
             }
+
+            const roomName = `call-${phoneNumber.replace('+', '')}-${Math.floor(Math.random() * 10000)}`;
+            const participantIdentity = `sip_${phoneNumber}`;
+
+            const metadata = JSON.stringify({
+                phone_number: phoneNumber,
+                user_prompt: prompt || '',
+                system_prompt: systemPrompt || undefined,
+                voice_id: voice || undefined,
+                temperature: temperature !== undefined ? Number(temperature) : undefined,
+            });
+
+            try {
+                await roomService.createRoom({ name: roomName, metadata, emptyTimeout: 60 * 5 });
+                await dispatchClient.createDispatch(roomName, AGENT_NAME, { metadata });
+                const info = await sipClient.createSipParticipant(SIP_TRUNK_ID, phoneNumber, roomName, {
+                    participantIdentity,
+                    participantName: 'Customer',
+                });
+                results.push({ phoneNumber, status: 'dispatched', id: info.sipCallId });
+            } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : 'unknown error';
+                console.error(`Failed to dispatch ${phoneNumber}:`, e);
+                results.push({ phoneNumber, status: 'failed', error: msg });
+            }
+
+            await new Promise((r) => setTimeout(r, 200));
         }
 
         return NextResponse.json({
             success: true,
             message: `Processed ${numbers.length} numbers`,
-            results
+            results,
         });
-
-    } catch (error: any) {
-        console.error("Queue error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Internal Server Error';
+        console.error('queue error:', err);
+        return NextResponse.json({ error: msg }, { status: 500 });
     }
 }

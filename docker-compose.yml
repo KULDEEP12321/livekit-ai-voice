@@ -1,9 +1,19 @@
 services:
-  voice-agent:
+  agent:
     build: .
     restart: unless-stopped
     env_file:
       - .env
+    network_mode: host
+
+  dashboard:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install --silent && npm run dev"
+    restart: unless-stopped
+    env_file:
+      - .env
     volumes:
-      - .:/app # For development/hot-reload (remove in prod)
-    network_mode: host # Recommended for WebRTC/Voice low latency
+      - ./dashboard:/app
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"

@@ -1,75 +1,93 @@
+"""
+Rapid X AI - Voice Agent Configuration
+
+All telephony / model / persona settings live here. Values fall back to
+environment variables (`.env`), with backward-compat fallbacks for the legacy
+`VOBIZ_*` names that earlier versions of this repo used.
+"""
+
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# =========================================================================================
-#  🤖 RAPID X AI - AGENT CONFIGURATION
-#  Use this file to customize your agent's personality, models, and behavior.
-# =========================================================================================
 
-# --- 1. AGENT PERSONA & PROMPTS ---
-# The main instructions for the AI. Defines who it is and how it behaves.
+def _env(*names, default=None):
+    """Return the first env var that is set among `names`, else `default`."""
+    for n in names:
+        v = os.getenv(n)
+        if v:
+            return v
+    return default
+
+
+# ---------------------------------------------------------------------------
+# 1. Agent persona & prompts
+# ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """
-You are a helpful and polite School Receptionist at "Rapid X High School".
+You are an outbound voice assistant. The user did not initiate this call —
+you are calling them.
 
-**Your Goal:** Answer questions from parents about admissions, fees, and timings.
+Default behaviors (override these via the dashboard "System Prompt" field):
+- Open by introducing who you are and why you are calling.
+- Speak fluent English and Hindi; switch language to match the user.
+- Keep replies to 1-2 sentences.
+- If the user explicitly asks for a human, call `transfer_call`.
+- On "bye" / "goodbye", say goodbye warmly and end the call.
 
-**Key Behaviors:**
-1. **Multilingual:** You can speak fluent English and Hindi. If the user speaks Hindi, switch to Hindi immediately.
-2. **Polite & Warm:** Always be welcomed and respectful.
-3. **Be Concise:** Keep answers short (1-2 sentences). 
-4. **Admissions:** If asked about admissions, say they are open for Grade 1 to 10 and ask if they want to schedule a visit.
-5. **Fees:** If asked about fees, say "Please visit the school office for exact details, but it starts at roughly 50k per year."
-
-**CRITICAL:**
-- Only use `transfer_call` if they explicitly ask to talk to the Principal or Admin.
-- If they say "Bye", say "Namaste" or "Goodbye" and end the call.
+This is a generic fallback. Set a real persona per call from the dashboard.
 """
 
-# The explicit first message the agent speaks when the user picks up.
-# This ensures the user knows who is calling immediately.
-INITIAL_GREETING = "The user has picked up the call. Introduce yourself as the School Receptionist immediately."
+INITIAL_GREETING = (
+    "The user has picked up the call. Introduce yourself and state the "
+    "reason for the call immediately, per your persona instructions."
+)
 
-# If the user initiates the call (inbound) or is already there:
-fallback_greeting = "Greet the user immediately."
-
-
-# --- 2. SPEECH-TO-TEXT (STT) SETTINGS ---
-# We use Deepgram for high-speed transcription.
-STT_PROVIDER = "deepgram"
-STT_MODEL = "nova-2"  # Recommended: "nova-2" (balanced) or "nova-3" (newest)
-STT_LANGUAGE = "en"   # "en" supports multi-language code switching in Nova 2
+FALLBACK_GREETING = "Greet the user and state the reason for the call."
 
 
-# --- 3. TEXT-TO-SPEECH (TTS) SETTINGS ---
-# Choose your voice provider: "openai", "sarvam" (Indian voices), or "cartesia" (Ultra-fast)
-DEFAULT_TTS_PROVIDER = "openai" 
-DEFAULT_TTS_VOICE = "alloy"      # OpenAI: alloy, echo, shimmer | Sarvam: anushka, aravind
+# ---------------------------------------------------------------------------
+# 2. Realtime model (Gemini Live native audio)
+#    Single round-trip: STT + LLM + TTS handled by Gemini Live.
+# ---------------------------------------------------------------------------
+GEMINI_API_KEY = _env("GEMINI_API_KEY", "GOOGLE_API_KEY")
+GEMINI_LIVE_MODEL = os.getenv(
+    "GEMINI_LIVE_MODEL",
+    "gemini-2.5-flash-native-audio-preview-12-2025",
+)
+GEMINI_VOICE = os.getenv("GEMINI_VOICE", "Puck")
+GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.8"))
 
-# Sarvam AI Specifics (for Indian Context)
-SARVAM_MODEL = "bulbul:v2"
-SARVAM_LANGUAGE = "en-IN" # or hi-IN
-
-# Cartesia Specifics
-CARTESIA_MODEL = "sonic-2"
-CARTESIA_VOICE = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
-
-
-# --- 4. LARGE LANGUAGE MODEL (LLM) SETTINGS ---
-# Choose "openai" or "groq"
-DEFAULT_LLM_PROVIDER = "openai"
-DEFAULT_LLM_MODEL = "gpt-4o-mini" # OpenAI default
-
-# Groq Specifics (Faster inference)
-GROQ_MODEL = "llama-3.3-70b-versatile"
-GROQ_TEMPERATURE = 0.7
+# Voices supported by Gemini Live native-audio.
+GEMINI_VOICES = [
+    "Puck", "Charon", "Kore", "Fenrir", "Aoede",
+    "Leda", "Orus", "Zephyr",
+]
 
 
-# --- 5. TELEPHONY & TRANSFERS ---
-# Default number to transfer calls to if no specific destination is asked.
+# ---------------------------------------------------------------------------
+# 3. Telephony (SIP)
+#    Primary names are SIP_*, with legacy VOBIZ_* honored as fallback.
+# ---------------------------------------------------------------------------
+SIP_TRUNK_ID = _env("SIP_TRUNK_ID", "VOBIZ_SIP_TRUNK_ID")
+SIP_DOMAIN = _env("SIP_DOMAIN", "VOBIZ_SIP_DOMAIN")
+SIP_USERNAME = _env("SIP_USERNAME", "VOBIZ_USERNAME")
+SIP_PASSWORD = _env("SIP_PASSWORD", "VOBIZ_PASSWORD")
+SIP_OUTBOUND_NUMBER = _env("SIP_OUTBOUND_NUMBER", "VOBIZ_OUTBOUND_NUMBER")
+
 DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER")
 
-# Vobiz Trunk Details (Loaded from .env usually, but you can hardcode if needed)
-SIP_TRUNK_ID = os.getenv("VOBIZ_SIP_TRUNK_ID")
-SIP_DOMAIN = os.getenv("VOBIZ_SIP_DOMAIN")
+
+# ---------------------------------------------------------------------------
+# 4. LiveKit
+# ---------------------------------------------------------------------------
+LIVEKIT_URL = os.getenv("LIVEKIT_URL")
+LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY")
+LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
+
+
+# ---------------------------------------------------------------------------
+# 5. Dashboard / deployment
+# ---------------------------------------------------------------------------
+DASHBOARD_PORT = int(os.getenv("PORT", "3000"))
+DASHBOARD_HOST = os.getenv("HOST", "0.0.0.0")
